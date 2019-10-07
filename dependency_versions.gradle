@@ -1,0 +1,10 @@
+ext {
+    //Build
+    build_tools_version = '29.0.0'
+    min_sdk_version = 23
+    target_sdk_version = 29
+
+    kotlin_coroutines_version = '1.3.2'
+
+    kotlin_qext_version = '0.0.1'
+}
