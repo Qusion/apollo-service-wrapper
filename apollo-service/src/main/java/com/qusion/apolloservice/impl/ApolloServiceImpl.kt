@@ -20,6 +20,7 @@ import com.qusion.apolloservice.api.ApolloService
 import com.qusion.apolloservice.exceptions.BusinessException
 import com.qusion.apolloservice.exceptions.NonExistentDataException
 import com.qusion.kotlin.lib.extensions.network.NetworkResult
+import okhttp3.CertificatePinner
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -35,9 +36,10 @@ import okhttp3.logging.HttpLoggingInterceptor
  * Build this class using some DI method.
  * */
 class ApolloServiceImpl(
-    private val context: Context,
-    private val interceptor: Interceptor? = null,
-    private val config: ApolloConfig
+        private val context: Context,
+        private val interceptor: Interceptor? = null,
+        private val certificatePinner: CertificatePinner? = null,
+        private val config: ApolloConfig
 ) : ApolloService {
 
     @Volatile
@@ -52,9 +54,9 @@ class ApolloServiceImpl(
     }
 
     override suspend fun <D : Operation.Data, T : Operation.Data, V : Operation.Variables> safeQuery(
-        query: Query<D, T, V>,
-        cachePolicy: HttpCachePolicy.Policy,
-        responseFetcher: ResponseFetcher
+            query: Query<D, T, V>,
+            cachePolicy: HttpCachePolicy.Policy,
+            responseFetcher: ResponseFetcher
     ): NetworkResult<T> {
         return try {
             query(query, cachePolicy, responseFetcher)
@@ -64,7 +66,7 @@ class ApolloServiceImpl(
     }
 
     override suspend fun <D : Operation.Data, T : Operation.Data, V : Operation.Variables> safeMutation(
-        mutation: Mutation<D, T, V>
+            mutation: Mutation<D, T, V>
     ): NetworkResult<T> {
         return try {
             mutate(mutation)
@@ -78,24 +80,24 @@ class ApolloServiceImpl(
     }
 
     private suspend fun <D : Operation.Data, T : Operation.Data, V : Operation.Variables> query(
-        query: Query<D, T, V>,
-        cachePolicy: HttpCachePolicy.Policy = HttpCachePolicy.NETWORK_ONLY,
-        responseFetcher: ResponseFetcher = ApolloResponseFetchers.NETWORK_ONLY
+            query: Query<D, T, V>,
+            cachePolicy: HttpCachePolicy.Policy = HttpCachePolicy.NETWORK_ONLY,
+            responseFetcher: ResponseFetcher = ApolloResponseFetchers.NETWORK_ONLY
     ): NetworkResult<T> {
 
         val response =
-            getClient().query(query).httpCachePolicy(cachePolicy).responseFetcher(responseFetcher)
-                .toDeferred().await()
+                getClient().query(query).httpCachePolicy(cachePolicy).responseFetcher(responseFetcher)
+                        .toDeferred().await()
 
         if (response.hasErrors()) {
             val error = response.errors().first()
             return NetworkResult.Error(
-                cause = BusinessException(error.message() ?: "")
+                    cause = BusinessException(error.message() ?: "")
             )
         }
         if (response.data() == null) {
             return NetworkResult.Error(
-                cause = NonExistentDataException()
+                    cause = NonExistentDataException()
             )
         }
 
@@ -103,7 +105,7 @@ class ApolloServiceImpl(
     }
 
     private suspend fun <D : Operation.Data, T : Operation.Data, V : Operation.Variables> mutate(
-        mutation: Mutation<D, T, V>
+            mutation: Mutation<D, T, V>
     ): NetworkResult<T> {
 
         val response = getClient().mutate(mutation).toDeferred().await()
@@ -111,12 +113,12 @@ class ApolloServiceImpl(
         if (response.hasErrors()) {
             val error = response.errors().first()
             return NetworkResult.Error(
-                cause = BusinessException(error.message() ?: "")
+                    cause = BusinessException(error.message() ?: "")
             )
         }
         if (response.data() == null) {
             return NetworkResult.Error(
-                cause = NonExistentDataException()
+                    cause = NonExistentDataException()
             )
         }
         return NetworkResult.Success(response.data()!!)
@@ -129,6 +131,9 @@ class ApolloServiceImpl(
             if (interceptor != null) {
                 addInterceptor(interceptor)
             }
+            if (certificatePinner != null) {
+                certificatePinner(certificatePinner)
+            }
         }.build()
 
         val apolloSqlHelper = ApolloSqlHelper.create(context, config.DB_NAME)
@@ -137,24 +142,24 @@ class ApolloServiceImpl(
         val resolver = object : CacheKeyResolver() {
 
             override fun fromFieldRecordSet(
-                field: ResponseField,
-                recordSet: MutableMap<String, Any>
+                    field: ResponseField,
+                    recordSet: MutableMap<String, Any>
             ): CacheKey {
                 return CacheKey.NO_KEY
             }
 
             override fun fromFieldArguments(
-                field: ResponseField,
-                variables: Operation.Variables
+                    field: ResponseField,
+                    variables: Operation.Variables
             ): CacheKey {
                 return CacheKey.NO_KEY
             }
         }
 
         return ApolloClient.builder()
-            .serverUrl(config.SERVER_BASE_URL)
-            .okHttpClient(okHttpClient)
-            .normalizedCache(cacheFactory, resolver)
-            .build()
+                .serverUrl(config.SERVER_BASE_URL)
+                .okHttpClient(okHttpClient)
+                .normalizedCache(cacheFactory, resolver)
+                .build()
     }
 }
