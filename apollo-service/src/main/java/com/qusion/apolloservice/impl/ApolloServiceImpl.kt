@@ -28,6 +28,8 @@ import okhttp3.logging.HttpLoggingInterceptor
 /**
  * @param interceptor Custom header interceptor. Usually used to insert some token or sid.
  *                    null if not provided/used.
+ * @param certificatePinner Custom certificate pinner. Used for SSH token pinning for secure connection.
+ *                    null if not provided/used.
  * @see ISessionProvider
  *
  * @param config Basic information wrapped in a data class.
