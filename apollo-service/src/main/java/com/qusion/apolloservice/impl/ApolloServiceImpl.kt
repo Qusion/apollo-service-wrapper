@@ -2,35 +2,42 @@ package com.qusion.apolloservice.impl
 
 import android.content.Context
 import com.apollographql.apollo.ApolloClient
-import com.apollographql.apollo.api.Mutation
-import com.apollographql.apollo.api.Operation
-import com.apollographql.apollo.api.Query
-import com.apollographql.apollo.api.ResponseField
+import com.apollographql.apollo.api.*
 import com.apollographql.apollo.api.cache.http.HttpCachePolicy
 import com.apollographql.apollo.cache.normalized.CacheKey
 import com.apollographql.apollo.cache.normalized.CacheKeyResolver
-import com.apollographql.apollo.cache.normalized.sql.ApolloSqlHelper
 import com.apollographql.apollo.cache.normalized.sql.SqlNormalizedCacheFactory
-import com.apollographql.apollo.coroutines.toDeferred
+import com.apollographql.apollo.coroutines.await
+import com.apollographql.apollo.coroutines.toFlow
 import com.apollographql.apollo.exception.ApolloNetworkException
 import com.apollographql.apollo.fetcher.ApolloResponseFetchers
 import com.apollographql.apollo.fetcher.ResponseFetcher
 import com.qusion.apolloservice.ApolloConfig
+import com.qusion.apolloservice.IRefreshToken
 import com.qusion.apolloservice.api.ApolloService
 import com.qusion.apolloservice.exceptions.BusinessException
-import com.qusion.apolloservice.exceptions.NonExistentDataException
+import com.qusion.apolloservice.exceptions.ExpiredSidException
 import com.qusion.kotlin.lib.extensions.network.NetworkResult
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
+import net.sqlcipher.database.SupportFactory
 import okhttp3.CertificatePinner
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
+import java.util.concurrent.TimeUnit
 
 /**
  * @param interceptor Custom header interceptor. Usually used to insert some token or sid.
  *                    null if not provided/used.
  * @param certificatePinner Custom certificate pinner. Used for SSH token pinning for secure connection.
  *                    null if not provided/used.
- * @see ISessionProvider
+ * @param refreshToken Custom class containing refreshTokenLogic. Invoked if we get [ExpiredSidException]
  *
  * @param config Basic information wrapped in a data class.
  * @see ApolloConfig
@@ -38,98 +45,155 @@ import okhttp3.logging.HttpLoggingInterceptor
  * Build this class using some DI method.
  * */
 class ApolloServiceImpl(
-        private val context: Context,
-        private val interceptor: Interceptor? = null,
-        private val certificatePinner: CertificatePinner? = null,
-        private val config: ApolloConfig
+    private val context: Context,
+    private val interceptor: Interceptor? = null,
+    private val certificatePinner: CertificatePinner? = null,
+    private val refreshToken: IRefreshToken? = null,
+    private val customTypeAdapters: List<Pair<ScalarType, CustomTypeAdapter<Any>>>,
+    private val config: ApolloConfig
 ) : ApolloService {
 
     @Volatile
-    private var client: ApolloClient? = null
+    private var queryClient: ApolloClient? = null
 
-    private fun getClient(): ApolloClient {
-        return client ?: synchronized(this) {
-            client ?: buildApolloClient().also {
-                client = it
+    @Volatile
+    private var mutationClient: ApolloClient? = null
+
+    private fun getQueryClient(): ApolloClient {
+        return queryClient ?: synchronized(this) {
+            queryClient ?: buildApolloQueryClient().also {
+                queryClient = it
+            }
+        }
+    }
+
+    private fun getMutationClient(): ApolloClient {
+        return mutationClient ?: synchronized(this) {
+            mutationClient ?: buildApolloMutationClient().also {
+                mutationClient = it
             }
         }
     }
 
     override suspend fun <D : Operation.Data, T : Operation.Data, V : Operation.Variables> safeQuery(
-            query: Query<D, T, V>,
-            cachePolicy: HttpCachePolicy.Policy,
-            responseFetcher: ResponseFetcher
+        query: Query<D, T, V>,
+        cachePolicy: HttpCachePolicy.Policy,
+        responseFetcher: ResponseFetcher
     ): NetworkResult<T> {
         return try {
             query(query, cachePolicy, responseFetcher)
-        } catch (ex: ApolloNetworkException) {
-            NetworkResult.Error(ex)
+        } catch (e: ApolloNetworkException) {
+            if (e.cause is ExpiredSidException && refreshToken != null) {
+                val refreshResult = refreshToken.refreshToken()
+                if (refreshResult is NetworkResult.Error) {
+                    return refreshResult
+                }
+
+                query(query)
+            } else {
+                NetworkResult.Error(cause = e)
+            }
         }
     }
 
     override suspend fun <D : Operation.Data, T : Operation.Data, V : Operation.Variables> safeMutation(
-            mutation: Mutation<D, T, V>
+        mutation: Mutation<D, T, V>
     ): NetworkResult<T> {
         return try {
             mutate(mutation)
-        } catch (ex: ApolloNetworkException) {
-            NetworkResult.Error(ex)
+        } catch (e: ApolloNetworkException) {
+            if (e.cause is ExpiredSidException && refreshToken != null) {
+
+                val refreshResult = refreshToken.refreshToken()
+                if (refreshResult is NetworkResult.Error) {
+                    return refreshResult
+                }
+                mutate(mutation)
+            } else {
+                NetworkResult.Error(cause = e)
+            }
         }
     }
 
-    override fun clearData() {
-        getClient().clearNormalizedCache()
-    }
+    @ExperimentalCoroutinesApi
+    override suspend fun <D : Operation.Data, T : Operation.Data, V : Operation.Variables> flow(
+        query: Query<D, T, V>
+    ): Flow<NetworkResult<T>> = getQueryClient()
+        .query(query)
+        .toBuilder()
+        .responseFetcher(ApolloResponseFetchers.CACHE_AND_NETWORK)
+        .build()
+        .toFlow()
+        .map {
+            if (it.hasErrors()) {
+                parseResponseError(it.errors?.first())
+            } else {
+                NetworkResult.Success(it.data!!)
+            }
+        }
+        .catch { e ->
+            if (e.cause is ExpiredSidException && refreshToken != null) {
+
+                val refreshResult = refreshToken.refreshToken()
+                if (refreshResult is NetworkResult.Error) {
+                    emit(refreshResult)
+                } else {
+                    emit(query(query))
+                }
+            } else {
+                emit(NetworkResult.Error(cause = e))
+            }
+        }
+        .catch { e ->
+            emit(NetworkResult.Error(cause = e))
+        }
+        .flowOn(Dispatchers.IO)
 
     private suspend fun <D : Operation.Data, T : Operation.Data, V : Operation.Variables> query(
-            query: Query<D, T, V>,
-            cachePolicy: HttpCachePolicy.Policy = HttpCachePolicy.NETWORK_ONLY,
-            responseFetcher: ResponseFetcher = ApolloResponseFetchers.NETWORK_ONLY
-    ): NetworkResult<T> {
+        query: Query<D, T, V>,
+        cachePolicy: HttpCachePolicy.Policy = HttpCachePolicy.NETWORK_ONLY,
+        responseFetcher: ResponseFetcher = ApolloResponseFetchers.NETWORK_ONLY
+    ): NetworkResult<T> = withContext(Dispatchers.IO) {
 
         val response =
-                getClient().query(query).httpCachePolicy(cachePolicy).responseFetcher(responseFetcher)
-                        .toDeferred().await()
+            getQueryClient().query(query).toBuilder().httpCachePolicy(cachePolicy)
+                .responseFetcher(responseFetcher).build().await()
 
         if (response.hasErrors()) {
-            val error = response.errors().first()
-            return NetworkResult.Error(
-                    cause = BusinessException(error.message() ?: "")
-            )
+            return@withContext parseResponseError(response.errors?.first())
         }
-        if (response.data() == null) {
-            return NetworkResult.Error(
-                    cause = NonExistentDataException()
-            )
-        }
-
-        return NetworkResult.Success(response.data()!!)
+        NetworkResult.Success(response.data!!)
     }
 
     private suspend fun <D : Operation.Data, T : Operation.Data, V : Operation.Variables> mutate(
-            mutation: Mutation<D, T, V>
-    ): NetworkResult<T> {
+        mutation: Mutation<D, T, V>
+    ): NetworkResult<T> = withContext(Dispatchers.IO) {
 
-        val response = getClient().mutate(mutation).toDeferred().await()
+        val response = getMutationClient().mutate(mutation).await()
 
         if (response.hasErrors()) {
-            val error = response.errors().first()
-            return NetworkResult.Error(
-                    cause = BusinessException(error.message() ?: "")
-            )
+            return@withContext parseResponseError(response.errors?.first())
         }
-        if (response.data() == null) {
-            return NetworkResult.Error(
-                    cause = NonExistentDataException()
-            )
-        }
-        return NetworkResult.Success(response.data()!!)
-
+        NetworkResult.Success(response.data!!)
     }
 
-    private fun buildApolloClient(): ApolloClient {
+    private fun parseResponseError(error: Error?): NetworkResult.Error {
+        return NetworkResult.Error(
+            cause = BusinessException(
+                message = error?.message
+            )
+        )
+    }
+
+    override fun clearData() {
+        getQueryClient().clearNormalizedCache()
+    }
+
+    private fun buildApolloQueryClient(): ApolloClient {
         val okHttpClient = OkHttpClient.Builder().apply {
             addInterceptor(HttpLoggingInterceptor().setLevel(config.HTTP_LOG_LEVEL))
+            readTimeout(config.TIMEOUT_TIME, TimeUnit.SECONDS)
+            writeTimeout(config.TIMEOUT_TIME, TimeUnit.SECONDS)
             if (interceptor != null) {
                 addInterceptor(interceptor)
             }
@@ -138,30 +202,65 @@ class ApolloServiceImpl(
             }
         }.build()
 
-        val apolloSqlHelper = ApolloSqlHelper.create(context, config.DB_NAME)
+        val cacheFactory = SqlNormalizedCacheFactory(
+            context,
+            config.DB_NAME,
+            SupportFactory(config.DB_PASSPHRASE.toByteArray())
+        )
 
-        val cacheFactory = SqlNormalizedCacheFactory(apolloSqlHelper)
         val resolver = object : CacheKeyResolver() {
-
             override fun fromFieldRecordSet(
-                    field: ResponseField,
-                    recordSet: MutableMap<String, Any>
+                field: ResponseField,
+                recordSet: Map<String, Any>
             ): CacheKey {
-                return CacheKey.NO_KEY
+                return if (recordSet.containsKey("id") && recordSet["id"] is String) {
+                    CacheKey.from(recordSet["id"] as String)
+                } else {
+                    CacheKey.NO_KEY
+                }
             }
 
             override fun fromFieldArguments(
-                    field: ResponseField,
-                    variables: Operation.Variables
+                field: ResponseField,
+                variables: Operation.Variables
             ): CacheKey {
-                return CacheKey.NO_KEY
+                return if (field.resolveArgument("id", variables) is String) {
+                    CacheKey.from(field.resolveArgument("id", variables) as String)
+                } else {
+                    CacheKey.NO_KEY
+                }
             }
         }
 
-        return ApolloClient.builder()
-                .serverUrl(config.SERVER_BASE_URL)
-                .okHttpClient(okHttpClient)
-                .normalizedCache(cacheFactory, resolver)
-                .build()
+        return ApolloClient.builder().apply {
+            serverUrl(config.SERVER_BASE_URL)
+            customTypeAdapters.forEach {
+                addCustomTypeAdapter(it.first, it.second)
+            }
+            okHttpClient(okHttpClient)
+            normalizedCache(cacheFactory, resolver)
+        }.build()
+    }
+
+    private fun buildApolloMutationClient(): ApolloClient {
+        val okHttpClient = OkHttpClient.Builder().apply {
+            addInterceptor(HttpLoggingInterceptor().setLevel(config.HTTP_LOG_LEVEL))
+            readTimeout(config.TIMEOUT_TIME, TimeUnit.SECONDS)
+            writeTimeout(config.TIMEOUT_TIME, TimeUnit.SECONDS)
+            if (interceptor != null) {
+                addInterceptor(interceptor)
+            }
+            if (certificatePinner != null) {
+                certificatePinner(certificatePinner)
+            }
+        }.build()
+
+        return ApolloClient.builder().apply {
+            serverUrl(config.SERVER_BASE_URL)
+            customTypeAdapters.forEach {
+                addCustomTypeAdapter(it.first, it.second)
+            }
+            okHttpClient(okHttpClient)
+        }.build()
     }
 }
