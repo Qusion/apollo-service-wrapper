@@ -17,7 +17,6 @@ import com.qusion.apolloservice.IRefreshToken
 import com.qusion.apolloservice.api.IApolloService
 import com.qusion.apolloservice.exceptions.BusinessException
 import com.qusion.apolloservice.exceptions.ExpiredSidException
-import com.qusion.apolloservice.exceptions.ForceLogoutException
 import com.qusion.kotlin.lib.extensions.network.NetworkResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -87,7 +86,7 @@ class ApolloServiceImpl<T>(
             if (e.cause is ExpiredSidException && refreshToken != null) {
                 val refreshResult = refreshToken.refreshToken()
                 if (refreshResult is NetworkResult.Error) {
-                    return NetworkResult.Error(ForceLogoutException("Token refresh failed"))
+                    return refreshResult
                 }
 
                 query(query)
@@ -107,7 +106,7 @@ class ApolloServiceImpl<T>(
 
                 val refreshResult = refreshToken.refreshToken()
                 if (refreshResult is NetworkResult.Error) {
-                    return NetworkResult.Error(ForceLogoutException("Token refresh failed"))
+                    return refreshResult
                 }
                 mutate(mutation)
             } else {
@@ -137,7 +136,7 @@ class ApolloServiceImpl<T>(
 
                 val refreshResult = refreshToken.refreshToken()
                 if (refreshResult is NetworkResult.Error) {
-                    emit(NetworkResult.Error(ForceLogoutException("Token refresh failed")))
+                    emit(refreshResult)
                 } else {
                     emit(query(query))
                 }
