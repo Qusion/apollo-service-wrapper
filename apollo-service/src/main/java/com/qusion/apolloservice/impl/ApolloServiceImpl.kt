@@ -46,7 +46,7 @@ import java.util.concurrent.TimeUnit
  * */
 class ApolloServiceImpl<T>(
     private val context: Context,
-    private val interceptor: Interceptor? = null,
+    private val interceptors: List<Interceptor>? = null,
     private val certificatePinner: CertificatePinner? = null,
     private val refreshToken: IRefreshToken? = null,
     private val customTypeAdapters: List<Pair<ScalarType, CustomTypeAdapter<T>>>,
@@ -194,9 +194,10 @@ class ApolloServiceImpl<T>(
             addInterceptor(HttpLoggingInterceptor().setLevel(config.HTTP_LOG_LEVEL))
             readTimeout(config.TIMEOUT_TIME, TimeUnit.SECONDS)
             writeTimeout(config.TIMEOUT_TIME, TimeUnit.SECONDS)
-            if (interceptor != null) {
-                addInterceptor(interceptor)
+            interceptors?.forEach {
+                addInterceptor(it)
             }
+
             if (certificatePinner != null) {
                 certificatePinner(certificatePinner)
             }
@@ -247,9 +248,10 @@ class ApolloServiceImpl<T>(
             addInterceptor(HttpLoggingInterceptor().setLevel(config.HTTP_LOG_LEVEL))
             readTimeout(config.TIMEOUT_TIME, TimeUnit.SECONDS)
             writeTimeout(config.TIMEOUT_TIME, TimeUnit.SECONDS)
-            if (interceptor != null) {
-                addInterceptor(interceptor)
+            interceptors?.forEach {
+                addInterceptor(it)
             }
+
             if (certificatePinner != null) {
                 certificatePinner(certificatePinner)
             }
