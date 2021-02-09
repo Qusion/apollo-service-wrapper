@@ -44,12 +44,12 @@ import java.util.concurrent.TimeUnit
  *
  * Build this class using some DI method.
  * */
-class ApolloServiceImpl(
+class ApolloServiceImpl<T>(
     private val context: Context,
     private val interceptor: Interceptor? = null,
     private val certificatePinner: CertificatePinner? = null,
     private val refreshToken: IRefreshToken? = null,
-    private val customTypeAdapters: List<Pair<ScalarType, CustomTypeAdapter<Any>>>,
+    private val customTypeAdapters: List<Pair<ScalarType, CustomTypeAdapter<T>>>,
     private val config: ApolloConfig
 ) : ApolloService {
 
