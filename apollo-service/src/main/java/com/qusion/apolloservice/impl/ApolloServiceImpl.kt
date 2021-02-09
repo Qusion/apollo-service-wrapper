@@ -150,10 +150,10 @@ class ApolloServiceImpl<T>(
         }
         .flowOn(Dispatchers.IO)
 
-    private suspend fun <D : Operation.Data, T : Operation.Data, V : Operation.Variables> query(
+    override suspend fun <D : Operation.Data, T : Operation.Data, V : Operation.Variables> query(
         query: Query<D, T, V>,
-        cachePolicy: HttpCachePolicy.Policy = HttpCachePolicy.NETWORK_ONLY,
-        responseFetcher: ResponseFetcher = ApolloResponseFetchers.NETWORK_ONLY
+        cachePolicy: HttpCachePolicy.Policy,
+        responseFetcher: ResponseFetcher
     ): NetworkResult<T> = withContext(Dispatchers.IO) {
 
         val response =
@@ -166,7 +166,7 @@ class ApolloServiceImpl<T>(
         NetworkResult.Success(response.data!!)
     }
 
-    private suspend fun <D : Operation.Data, T : Operation.Data, V : Operation.Variables> mutate(
+    override suspend fun <D : Operation.Data, T : Operation.Data, V : Operation.Variables> mutate(
         mutation: Mutation<D, T, V>
     ): NetworkResult<T> = withContext(Dispatchers.IO) {
 

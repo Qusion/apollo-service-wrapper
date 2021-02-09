@@ -56,6 +56,42 @@ interface IApolloService {
         mutation: Mutation<D, T, V>
     ): NetworkResult<T>
 
+    /** Calls query on ApolloClient.
+     * This function doesn't respond to errors and just passes them.
+     *
+     * If you wan't to leverage provided error handling, please call safeQuery instead
+     * Only exposed for special needs, you shouldn't have to use this
+     * Safe to call in any coroutine (its main-safe)
+     *
+     * @param cachePolicy specify which cache policy should the query be built with
+     * @see HttpCachePolicy
+     *
+     * @param responseFetcher specify which responseFetcher should the query be built with
+     * (usually the same as cachePolicy)
+     * @see ApolloResponseFetchers
+     *
+     * @return NetworkResult.Error of the cause or NetworkResult.Success with the correct data
+     * @see NetworkResult */
+    suspend fun <D : Operation.Data, T : Operation.Data, V : Operation.Variables> query(
+        query: Query<D, T, V>,
+        cachePolicy: HttpCachePolicy.Policy = HttpCachePolicy.NETWORK_ONLY,
+        responseFetcher: ResponseFetcher = ApolloResponseFetchers.NETWORK_ONLY
+    ): NetworkResult<T>
+
+
+    /** Calls query on ApolloClient.
+     * This function doesn't respond to errors and just passes them.
+     *
+     * If you wan't to leverage provided error handling, please call safeMutation instead
+     * Only exposed for special needs, you shouldn't have to use this
+     * Safe to call in any coroutine (its main-safe)
+     *
+     * @return NetworkResult.Error of the cause or NetworkResult.Success with the correct data
+     * @see NetworkResult */
+    suspend fun <D : Operation.Data, T : Operation.Data, V : Operation.Variables> mutate(
+        mutation: Mutation<D, T, V>
+    ): NetworkResult<T>
+
     /**
      * Clears the normalized cache (on disk cache).
      */
