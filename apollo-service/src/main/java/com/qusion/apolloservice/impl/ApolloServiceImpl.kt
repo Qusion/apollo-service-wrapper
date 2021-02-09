@@ -17,6 +17,7 @@ import com.qusion.apolloservice.IRefreshToken
 import com.qusion.apolloservice.api.ApolloService
 import com.qusion.apolloservice.exceptions.BusinessException
 import com.qusion.apolloservice.exceptions.ExpiredSidException
+import com.qusion.apolloservice.exceptions.ForceLogoutException
 import com.qusion.kotlin.lib.extensions.network.NetworkResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -33,7 +34,7 @@ import okhttp3.logging.HttpLoggingInterceptor
 import java.util.concurrent.TimeUnit
 
 /**
- * @param interceptor Custom header interceptor. Usually used to insert some token or sid.
+ * @param interceptors Custom header interceptors. Usually used to insert some token or sid.
  *                    null if not provided/used.
  * @param certificatePinner Custom certificate pinner. Used for SSH token pinning for secure connection.
  *                    null if not provided/used.
@@ -86,7 +87,7 @@ class ApolloServiceImpl<T>(
             if (e.cause is ExpiredSidException && refreshToken != null) {
                 val refreshResult = refreshToken.refreshToken()
                 if (refreshResult is NetworkResult.Error) {
-                    return refreshResult
+                    return NetworkResult.Error(ForceLogoutException("Token refresh failed"))
                 }
 
                 query(query)
@@ -106,7 +107,7 @@ class ApolloServiceImpl<T>(
 
                 val refreshResult = refreshToken.refreshToken()
                 if (refreshResult is NetworkResult.Error) {
-                    return refreshResult
+                    return NetworkResult.Error(ForceLogoutException("Token refresh failed"))
                 }
                 mutate(mutation)
             } else {
@@ -136,7 +137,7 @@ class ApolloServiceImpl<T>(
 
                 val refreshResult = refreshToken.refreshToken()
                 if (refreshResult is NetworkResult.Error) {
-                    emit(refreshResult)
+                    emit(NetworkResult.Error(ForceLogoutException("Token refresh failed")))
                 } else {
                     emit(query(query))
                 }
