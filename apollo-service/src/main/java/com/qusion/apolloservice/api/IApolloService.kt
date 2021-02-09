@@ -10,7 +10,7 @@ import com.qusion.kotlin.lib.extensions.network.NetworkResult
 import kotlinx.coroutines.flow.Flow
 
 /** Injected in every Repository */
-interface ApolloService {
+interface IApolloService {
 
     /** Calls query on ApolloClient.
      * Catches errors and responds to expired sid.

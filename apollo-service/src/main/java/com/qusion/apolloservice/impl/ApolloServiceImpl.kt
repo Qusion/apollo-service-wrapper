@@ -14,7 +14,7 @@ import com.apollographql.apollo.fetcher.ApolloResponseFetchers
 import com.apollographql.apollo.fetcher.ResponseFetcher
 import com.qusion.apolloservice.ApolloConfig
 import com.qusion.apolloservice.IRefreshToken
-import com.qusion.apolloservice.api.ApolloService
+import com.qusion.apolloservice.api.IApolloService
 import com.qusion.apolloservice.exceptions.BusinessException
 import com.qusion.apolloservice.exceptions.ExpiredSidException
 import com.qusion.apolloservice.exceptions.ForceLogoutException
@@ -52,7 +52,7 @@ class ApolloServiceImpl<T>(
     private val refreshToken: IRefreshToken? = null,
     private val customTypeAdapters: List<Pair<ScalarType, CustomTypeAdapter<T>>>,
     private val config: ApolloConfig
-) : ApolloService {
+) : IApolloService {
 
     @Volatile
     private var queryClient: ApolloClient? = null
