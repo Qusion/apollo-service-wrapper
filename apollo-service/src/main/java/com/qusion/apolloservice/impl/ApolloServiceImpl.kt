@@ -44,12 +44,12 @@ import java.util.concurrent.TimeUnit
  *
  * Build this class using some DI method.
  * */
-class ApolloServiceImpl<T>(
+class ApolloServiceImpl(
     private val context: Context,
     private val interceptors: List<Interceptor>? = null,
     private val certificatePinner: CertificatePinner? = null,
     private val refreshToken: IRefreshToken? = null,
-    private val customTypeAdapters: List<Pair<ScalarType, CustomTypeAdapter<T>>>,
+    private val customTypeAdapters: List<Pair<ScalarType, CustomTypeAdapter<*>>>? = null,
     private val config: ApolloConfig
 ) : IApolloService {
 
@@ -84,7 +84,7 @@ class ApolloServiceImpl<T>(
             query(query, cachePolicy, responseFetcher)
         } catch (e: ApolloNetworkException) {
             if (e.cause is ExpiredSidException && refreshToken != null) {
-                val refreshResult = refreshToken.refreshToken()
+                val refreshResult = refreshToken.refreshToken(this)
                 if (refreshResult is NetworkResult.Error) {
                     return refreshResult
                 }
@@ -104,7 +104,7 @@ class ApolloServiceImpl<T>(
         } catch (e: ApolloNetworkException) {
             if (e.cause is ExpiredSidException && refreshToken != null) {
 
-                val refreshResult = refreshToken.refreshToken()
+                val refreshResult = refreshToken.refreshToken(this)
                 if (refreshResult is NetworkResult.Error) {
                     return refreshResult
                 }
@@ -134,7 +134,7 @@ class ApolloServiceImpl<T>(
         .catch { e ->
             if (e.cause is ExpiredSidException && refreshToken != null) {
 
-                val refreshResult = refreshToken.refreshToken()
+                val refreshResult = refreshToken.refreshToken(this@ApolloServiceImpl)
                 if (refreshResult is NetworkResult.Error) {
                     emit(refreshResult)
                 } else {
@@ -189,6 +189,10 @@ class ApolloServiceImpl<T>(
         getQueryClient().clearNormalizedCache()
     }
 
+    override suspend fun refreshToken() {
+        refreshToken?.refreshToken(this)
+    }
+
     private fun buildApolloQueryClient(): ApolloClient {
         val okHttpClient = OkHttpClient.Builder().apply {
             addInterceptor(HttpLoggingInterceptor().setLevel(config.HTTP_LOG_LEVEL))
@@ -235,7 +239,7 @@ class ApolloServiceImpl<T>(
 
         return ApolloClient.builder().apply {
             serverUrl(config.SERVER_BASE_URL)
-            customTypeAdapters.forEach {
+            customTypeAdapters?.forEach {
                 addCustomTypeAdapter(it.first, it.second)
             }
             okHttpClient(okHttpClient)
@@ -259,7 +263,7 @@ class ApolloServiceImpl<T>(
 
         return ApolloClient.builder().apply {
             serverUrl(config.SERVER_BASE_URL)
-            customTypeAdapters.forEach {
+            customTypeAdapters?.forEach {
                 addCustomTypeAdapter(it.first, it.second)
             }
             okHttpClient(okHttpClient)

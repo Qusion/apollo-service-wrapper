@@ -96,4 +96,9 @@ interface IApolloService {
      * Clears the normalized cache (on disk cache).
      */
     fun clearData()
+
+    /**
+     * Calls refresh token directly, if provided
+     */
+    suspend fun refreshToken()
 }
