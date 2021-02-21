@@ -103,7 +103,6 @@ class ApolloServiceImpl(
             mutate(mutation)
         } catch (e: ApolloNetworkException) {
             if (e.cause is ExpiredSidException && refreshToken != null) {
-
                 val refreshResult = refreshToken.refreshToken(this)
                 if (refreshResult is NetworkResult.Error) {
                     return refreshResult
@@ -133,7 +132,6 @@ class ApolloServiceImpl(
         }
         .catch { e ->
             if (e.cause is ExpiredSidException && refreshToken != null) {
-
                 val refreshResult = refreshToken.refreshToken(this@ApolloServiceImpl)
                 if (refreshResult is NetworkResult.Error) {
                     emit(refreshResult)
@@ -143,9 +141,6 @@ class ApolloServiceImpl(
             } else {
                 emit(NetworkResult.Error(cause = e))
             }
-        }
-        .catch { e ->
-            emit(NetworkResult.Error(cause = e))
         }
         .flowOn(Dispatchers.IO)
 
