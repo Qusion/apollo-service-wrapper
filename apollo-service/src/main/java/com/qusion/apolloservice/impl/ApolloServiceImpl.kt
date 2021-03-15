@@ -20,6 +20,7 @@ import com.qusion.apolloservice.exceptions.ExpiredSidException
 import com.qusion.kotlin.lib.extensions.network.NetworkResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flowOn
@@ -67,6 +68,9 @@ class ApolloServiceImpl(
         }
     }
 
+    @Volatile
+    private var isRefreshingToken: Boolean = false
+
     private fun getMutationClient(): ApolloClient {
         return mutationClient ?: synchronized(this) {
             mutationClient ?: buildApolloMutationClient().also {
@@ -84,9 +88,20 @@ class ApolloServiceImpl(
             query(query, cachePolicy, responseFetcher)
         } catch (e: ApolloNetworkException) {
             if (e.cause is ExpiredSidException && refreshToken != null) {
-                val refreshResult = refreshToken.refreshToken(this)
-                if (refreshResult is NetworkResult.Error) {
-                    return refreshResult
+                if (!isRefreshingToken) {
+                    isRefreshingToken = true
+                    val refreshResult = refreshToken.refreshToken(this)
+
+                    isRefreshingToken = false
+                    if (refreshResult is NetworkResult.Error) {
+                        return refreshResult
+                    }
+                } else {
+                    var retryCount = 0
+                    while(isRefreshingToken && retryCount < MAX_RETRY_COUNT) {
+                        retryCount++
+                        delay(500)
+                    }
                 }
 
                 query(query)
@@ -103,12 +118,25 @@ class ApolloServiceImpl(
             mutate(mutation)
         } catch (e: ApolloNetworkException) {
             if (e.cause is ExpiredSidException && refreshToken != null) {
-                val refreshResult = refreshToken.refreshToken(this)
-                if (refreshResult is NetworkResult.Error) {
-                    return refreshResult
+                if (!isRefreshingToken) {
+                    isRefreshingToken = true
+                    val refreshResult = refreshToken.refreshToken(this)
+
+                    isRefreshingToken = false
+                    if (refreshResult is NetworkResult.Error) {
+                        return refreshResult
+                    }
+                } else {
+                    var retryCount = 0
+                    while(isRefreshingToken && retryCount < MAX_RETRY_COUNT) {
+                        retryCount++
+                        delay(500)
+                    }
                 }
+
                 mutate(mutation)
             } else {
+
                 NetworkResult.Error(cause = e)
             }
         }
@@ -132,10 +160,22 @@ class ApolloServiceImpl(
         }
         .catch { e ->
             if (e.cause is ExpiredSidException && refreshToken != null) {
-                val refreshResult = refreshToken.refreshToken(this@ApolloServiceImpl)
-                if (refreshResult is NetworkResult.Error) {
-                    emit(refreshResult)
+                if (!isRefreshingToken) {
+                    isRefreshingToken = true
+                    val refreshResult = refreshToken.refreshToken(this@ApolloServiceImpl)
+
+                    isRefreshingToken = false
+                    if (refreshResult is NetworkResult.Error) {
+                        emit(refreshResult)
+                    } else {
+                        emit(query(query))
+                    }
                 } else {
+                    var retryCount = 0
+                    while (isRefreshingToken && retryCount < MAX_RETRY_COUNT) {
+                        retryCount++
+                        delay(500)
+                    }
                     emit(query(query))
                 }
             } else {
@@ -263,5 +303,9 @@ class ApolloServiceImpl(
             }
             okHttpClient(okHttpClient)
         }.build()
+    }
+
+    companion object {
+        private const val MAX_RETRY_COUNT = 10
     }
 }
